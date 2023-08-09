@@ -1,9 +1,9 @@
-// stdafx.h : include file for standard system include files,
-// or project specific include files that are used frequently, but
-// are changed infrequently
-//
-
+/////////////////////////////////////////////////////////////////////////////
+// Copyright © 2023 by W. T. Block, all rights reserved
+/////////////////////////////////////////////////////////////////////////////
 #pragma once
+#define _CRT_SECURE_NO_WARNINGS
+#define NO_WARN_MBCS_MFC_DEPRECATION
 
 #include "targetver.h"
 
