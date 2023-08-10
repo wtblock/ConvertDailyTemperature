@@ -9,11 +9,11 @@
 #define new DEBUG_NEW
 #endif
 
+/////////////////////////////////////////////////////////////////////////////
 // The one and only application object
 CWinApp theApp;
 
 using namespace std;
-
 
 /////////////////////////////////////////////////////////////////////////////
 // header string for the CSV file being written
@@ -41,9 +41,15 @@ bool ProcessState( CStdioFile& fErr )
 		return false;
 	}
 
+	// write the data into a file named after the two character
+	// state abbreviation with a CSV extension
 	const CString csFolder = CHelper::GetDirectory( m_csPath );
 	const CString csData = csFolder + m_csState + _T( ".CSV" );
 
+	const float fMissing = -9999.0f;
+
+	// create the file if it does not exist or replace the data
+	// if the file does exist
 	CStdioFile fileWrite;
 	const bool value =
 		FALSE != fileWrite.Open
@@ -51,7 +57,10 @@ bool ProcessState( CStdioFile& fErr )
 			csData, CFile::modeWrite | CFile::modeCreate | CFile::shareDenyNone
 		);
 
+	// the first line is the CSV header
 	bool bFirst = true;
+
+	// if the file opened okay
 	if ( value == true )
 	{
 		for ( auto& dates : m_StationDates.Items )
@@ -66,31 +75,59 @@ bool ProcessState( CStdioFile& fErr )
 				bFirst = false;
 			}
 
+			// every line begins with the date
 			CString csOut = dates.first;
+
+			// a collection sorted by station containing a 
+			// temperature reading for each station
 			STATIONS stations = *dates.second;
 
-			// generate a line of CSV
+			// m_StateStations is a sorted list of stations to insure
+			// the data is always output in the same order for
+			// each line of the CSV file output
 			for ( auto& station : m_StateStations.Items )
 			{
+				// the station for the recorded temperature
 				const CString csStation = station.first;
-				float fTemp = -9999.0;
+
+				// default to missing data
+				float fTemp = fMissing;
+
+				// if data was recorded for the station it will be
+				// found in the date record
 				if ( dates.second->Exists[ csStation ] )
 				{
-					shared_ptr<float> pValue = dates.second->find( csStation );
-					fTemp = *pValue;
+					// read the temperature recorded for this station
+					// on this date
+					shared_ptr<float> pValue = 
+						dates.second->find( csStation );
+
+					// there are some very high readings that are obviously
+					// errors, so replace with missing data value
+					if ( *pValue < 150.0f )
+					{
+						fTemp = *pValue;
+					}
 				}
+
+				// append the station value to the line of output
 				CString csTemp;
 				csTemp.Format( _T( "%s,%f" ), csOut, fTemp );
 				csOut = csTemp;
 			}
+
+			// write a line of CSV to the output
 			fileWrite.WriteString( csOut + _T( "\n" ));
 		}
 
+		// close the CSV file
 		fileWrite.Close();
 	}
 
 	// assign the new state name
 	m_csState = m_csFilename;
+
+	// clear the station collections
 	m_StationDates.clear();
 	m_StateStations.clear();
 
@@ -101,12 +138,13 @@ bool ProcessState( CStdioFile& fErr )
 // read a CSV file containing station data
 void ProcessStation( CStdioFile& fErr )
 {
-	// keep track of stations used
+	// keep track of stations used in this sorted collection
 	if ( !m_StateStations.Exists[ m_csStation ] )
 	{
 		shared_ptr<float> pData = shared_ptr<float>( new float( 0.0f ));
 		m_StateStations.add( m_csStation, pData );
 	}
+
 	// open the stations text file
 	CStdioFile file;
 	const bool value =
@@ -123,12 +161,17 @@ void ProcessStation( CStdioFile& fErr )
 		const CString csDelim( _T( "," ));
 		while ( file.ReadString( csLine ) )
 		{
+			// the first token of the line is the date: yyyymmdd
 			int nStart = 0;
 			const CString csDate = csLine.Tokenize( csDelim, nStart );
+
+			// ignore the CSV header line
 			if ( csDate == _T( "Date" ) )
 			{
 				continue;
 			}
+
+			// the second token of the line is the fahrenheit temperature
 			const CString csTemp = csLine.Tokenize( csDelim, nStart );
 			const float fTemp = (float)_tstof( csTemp );
 
@@ -138,20 +181,25 @@ void ProcessStation( CStdioFile& fErr )
 			// find or create a date which is a collection of stations
 			if ( m_StationDates.Exists[ csDate ] )
 			{
+				// find the existing station
 				pStations = m_StationDates.find( csDate );
 			}
-			else
+			else // create a new station 
 			{
 				pStations = shared_ptr<STATIONS>( new STATIONS );
-				pStations->add( m_csStation, shared_ptr<float>( new float( fTemp )));
+
+				// record the stations with the date
 				m_StationDates.add( csDate, pStations );
 			}
+
+			// record the temperature associated with the station
+			pStations->add( m_csStation, shared_ptr<float>( new float( fTemp ) ) );
 		}
 	}
 } // ProcessStation
 
 /////////////////////////////////////////////////////////////////////////////
-// crawl through the directory tree looking for supported image extensions
+// crawl through the directory tree looking for wild card files
 void RecursePath( CStdioFile& fErr, LPCTSTR path )
 {
 	USES_CONVERSION;
@@ -174,9 +222,11 @@ void RecursePath( CStdioFile& fErr, LPCTSTR path )
 		{
 			const CString str = finder.GetFilePath();
 			m_csFilename = CHelper::GetFileName( str );
+
+			// if the state changes, process previous state
 			if ( m_csFilename != m_csState )
 			{
-				// process previous state
+				// write a message to the console update the status
 				CString csMessage;
 				csMessage.Format
 				( 
@@ -185,9 +235,11 @@ void RecursePath( CStdioFile& fErr, LPCTSTR path )
 				);
 				fErr.WriteString( csMessage );
 
+				// process all of the data collected for the current state
 				ProcessState( fErr );
 			}
 
+			// handle this directory data
 			RecursePath( fErr, str + m_csWildcard );
 		}
 		else // process if it is a valid filename
@@ -197,20 +249,24 @@ void RecursePath( CStdioFile& fErr, LPCTSTR path )
 			const CString csExt = CHelper::GetExtension( m_csPath );
 			if ( csExt == _T( ".CSV" ) && m_csFilename.Left( 4 ) == _T( "TMAX" ) )
 			{
+				// write a status message to the console
 				CString csMessage;
 				csMessage.Format( _T( "%s\n" ), m_csPath );
 				fErr.WriteString( csMessage );
 
+				// parse the station code and state name from the folder name
 				const CString csFolder = 
 					CHelper::GetDirectory( m_csPath ).TrimRight( _T( "\\" ));
 				m_csState = CHelper::GetFileName( csFolder );
 				m_csStation = m_csFilename.Right( 6 );
 
+				// process the station data
 				ProcessStation( fErr );
 			}
 		}
 	}
 
+	// done with the finder
 	finder.Close();
 
 	// the last state will need to be processed
@@ -218,6 +274,7 @@ void RecursePath( CStdioFile& fErr, LPCTSTR path )
 	{
 		ProcessState( fErr );
 	}
+
 } // RecursePath
 
 /////////////////////////////////////////////////////////////////////////////
@@ -256,6 +313,9 @@ bool ReadStations()
 bool ReadStates()
 {
 	bool value = false;
+
+	// create an array of tuples containing the state code, abbreviation, 
+	// and name
 	const CString states[] =
 	{
 		_T( "01,AL,Alabama" ),
@@ -308,6 +368,7 @@ bool ReadStates()
 		_T( "48,WY,Wyoming" )
 	};
 
+	// build a cross reference to this information
 	for ( auto& node : states )
 	{
 		int nStart = 0;
@@ -327,10 +388,12 @@ bool ReadStates()
 			pState->Postal = csPostal;
 			pState->Name = csName;
 
+			// index by two letter state abbreviation
 			m_States.add( csPostal, pState );
 			shared_ptr<CString> pPostal( new CString( csPostal ) );
-			m_StateCodes.add( csCode, pPostal );
 
+			// build a cross reference indexed by the numerical code
+			m_StateCodes.add( csCode, pPostal );
 		}
 		while ( true );
 
@@ -508,8 +571,13 @@ int _tmain( int argc, TCHAR* argv[], TCHAR* envp[] )
 	// out of context before the program ends to prevent
 	// memory leaks
 	{
+		// read the state metadata
 		ReadStates();
+
+		// read the station metadata
 		ReadStations();
+
+		// build a path containing wild card data
 		const CString csRight = m_csPath.Right( 1 );
 		if ( csRight != _T( "\\" ) )
 		{
@@ -517,11 +585,13 @@ int _tmain( int argc, TCHAR* argv[], TCHAR* envp[] )
 		}
 		m_csPath += _T( "*.*" );
 
+		// process the entire directory tree from the first parameter
 		RecursePath( fErr, m_csPath );
 	}
 
 	// all is good
 	return 0;
+
 } // _tmain
 
 /////////////////////////////////////////////////////////////////////////////
